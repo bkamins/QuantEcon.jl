@@ -9,8 +9,9 @@ apply Hodrick-Prescott filter to `AbstractVector`.
 - `y_cyclical::Vector`: cyclical component
 - `y_trend::Vector`: trend component
 """
-function hp_filter(y::AbstractVector{T}, λ::Real) where T <: Real
-    y = Vector(y)
+function hp_filter(y::AbstractVector{<:Real}, λ::Real)
+    λ = Float64(λ)
+    y = Float64.(y)
     N = length(y)
     H = spdiagm(-2 => fill(λ, N-2),
                 -1 => vcat(-2λ, fill(-4λ, N - 3), -2λ),
@@ -18,9 +19,9 @@ function hp_filter(y::AbstractVector{T}, λ::Real) where T <: Real
                            1 + 5λ, 1 + λ),
                  1 => vcat(-2λ, fill(-4λ, N - 3), -2λ),
                  2 => fill(λ, N-2))
-    y_trend = float(H) \ y
-    y_cyclical = y - y_trend
-    return y_cyclical, y_trend
+    y_trend = H \ y
+    y .-= y_trend # cyclical
+    return y, y_trend
 end
 
 @doc doc"""
@@ -41,21 +42,22 @@ Note: For seasonal data, it's desirable for `p` and `h` to be integer multiples
 - `y_cycle::Vector` : cyclical component
 - `y_trend::Vector` : trend component
 """
-function hamilton_filter(y::AbstractVector, h::Integer, p::Integer)
-    y = Vector(y)
+function hamilton_filter(y::AbstractVector{<:Real}, h::Integer, p::Integer)
     T = length(y)
     y_cycle = fill(NaN, T)
 
     # construct X matrix of lags
-    X = ones(T-p-h+1)
-    for j = 1:p
-        X = hcat(X, y[p-j+1:T-h-j+1])
+    X = Matrix{Float64}(undef, T-p-h+1, p + 1)
+    X[:, 1] .= 1
+    for j in 1:p
+        X[:, j + 1] = view(y, p-j+1:T-h-j+1)
     end
 
     # do OLS regression
-    b = (X'*X)\(X'*y[p+h:T])
-    y_cycle[p+h:T] = y[p+h:T] - X*b
-    y_trend = vcat(fill(NaN, p+h-1), X*b)
+    b = (X' * X) \ (X' * view(y, p+h:T))
+    Xb = X * b
+    y_cycle[p+h:T] .= view(y, p+h:T) .- Xb
+    y_trend = append!(fill(NaN, p+h-1), Xb)
     return y_cycle, y_trend
 end
 
@@ -77,11 +79,11 @@ Note: For seasonal data, it's desirable for `h` to be an integer multiple
 - `y_cycle::Vector` : cyclical component
 - `y_trend::Vector` : trend component
 """
-function hamilton_filter(y::AbstractVector, h::Integer)
-    y = Vector(y)
+function hamilton_filter(y::AbstractVector{<:Real}, h::Integer)
+    y = Vector{Float64}(y)
     T = length(y)
     y_cycle = fill(NaN, T)
-    y_cycle[h+1:T] = y[h+1:T] - y[1:T-h]
-    y_trend = y - y_cycle
-    return y_cycle, y_trend
+    y_cycle[h+1:T] .= view(y, h+1:T) .- view(y, 1:T-h)
+    y .-= y_cycle # trend
+    return y_cycle, y
 end
